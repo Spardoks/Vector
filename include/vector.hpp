@@ -1,7 +1,9 @@
 ﻿#ifndef VECTOR_HPP
 #define VECTOR_HPP
 
+#include <algorithm>
 #include <iostream>
+#include <limits>
 
 template<typename Type>
 class Vector
@@ -27,12 +29,12 @@ class Vector
     ~Vector();
 
     // Добавить элемент в конец вектора
-    void push_back(const Type& element);
+    void pushBack(const Type& element);
 
     // Удалить элемент из конца вектора
-    void pop_back();
+    void popBack();
 
-    // Добавить в вектор count элементов со значением value
+    // Проинициализировать первые count элементов значением value
     void assign(std::size_t count, const Type& value);
 
     // Вовзрат ссылки на последний элемент в векторе
@@ -47,6 +49,9 @@ class Vector
     // Возвращает текущую заполненность вектора
     std::size_t size() const;
 
+    // Возвращает максимальную возможную заполненность вектора
+    std::size_t maxSize() const;
+
     // Вовзращает true, если вектор пустой, иначе - false
     bool empty() const;
 
@@ -56,11 +61,11 @@ class Vector
     // Выделяет память для хранения как минимум size элементов типа Type, не инициализируя
     void reserve(std::size_t size);
 
-    // Делает размер вектора как минимум count и инициализирует вставленные элементы стандартным значением
+    // Создаёт в векторе count элементов и инициализирует их стандартными значениями
     void resize(std::size_t count);
 
-    // Если неиспользуемой памяти слишком много, то сокращает её размер до count_
-    void shrink_to_fit();
+    // Если неиспользуемой памяти слишком много, то сокращает её размер до 2^round(log2(count_))
+    void shrinkToFit();
 
     // Возвращает ссылку на элемент в позиции index
     Type& at(std::size_t index);
@@ -74,14 +79,15 @@ class Vector
     // Возвращает константную ссылку на элемент в позиции index
     const Type& operator[](std::size_t index) const;
 
-    // ToDo
-    /*
-      // Вставка в конец стразу нескольких элементов
-      template <class Args>
-      void emplace_back(Args && args);
-    */
+    // ToDo: TEST IT BETTER
+    // Конструирование элементов в конце вектора
+    template <class ...Args>
+    void emplaceBack(Args&&... args);
 
   private:
+
+    // Обмен значениями
+    void swap(Vector& other);
 
     // Указатель на массив с данными
     Type* data_;
@@ -98,26 +104,19 @@ class Vector
 //***************************************************************************//
 template<typename Type>
 Vector<Type>::Vector()
+    : data_{nullptr}, count_{0}, capacity_{0}
 {
-    data_ = nullptr;
-    count_ = 0;
-    capacity_ = 0;
 }
 
 
 
 template<typename Type>
 Vector<Type>::Vector(const Vector<Type>& other)
+    : data_{nullptr}, count_{other.count_}, capacity_{other.capacity_}
 {
-    count_ = other.count_;
-    capacity_ = other.capacity_;
-    data_ = nullptr;
-
     if (capacity_ != 0) {
         data_ = new Type[capacity_];
-        for (std::size_t i = 0; i < count_; i++) {
-            data_[i] = other.data_[i];
-        }
+        std::copy(other.data_, other.data_ + count_, data_);
     }
 }
 
@@ -125,14 +124,9 @@ Vector<Type>::Vector(const Vector<Type>& other)
 
 template<typename Type>
 Vector<Type>::Vector(Vector<Type>&& other)
+    : Vector()
 {
-    count_ = other.count_;
-    capacity_ = other.capacity_;
-    data_ = other.data_;
-
-    other.count_ = 0;
-    other.capacity_ = 0;
-    other.data_ = nullptr;
+    swap(other);
 }
 
 
@@ -140,26 +134,10 @@ Vector<Type>::Vector(Vector<Type>&& other)
 template<typename Type>
 Vector<Type>& Vector<Type>::operator=(const Vector<Type>& other)
 {
-    if (this == &other) {
-      return *this;
+    if (this != &other) {
+        Vector<Type> tmp(other);
+        tmp.swap(*this);
     }
-
-    std::size_t newCount = other.count_;
-    std::size_t newCapacity = other.capacity_;
-    Type* newData = nullptr;
-
-    if (newCapacity > 0) {
-        newData = new Type[newCapacity];
-        for (std::size_t i = 0; i < newCount; i++) {
-            newData[i] = other.data_[i];
-        }
-    }
-
-    delete[] data_;
-    data_ = newData;
-    count_ = newCount;
-    capacity_ = newCapacity;
-
     return *this;
 }
 
@@ -168,18 +146,7 @@ Vector<Type>& Vector<Type>::operator=(const Vector<Type>& other)
 template<typename Type>
 Vector<Type>& Vector<Type>::operator=(Vector<Type>&& other)
 {
-    std::size_t oldCount = count_;
-    std::size_t oldCapacity = capacity_;
-    Type* oldData = data_;
-
-    count_ = other.count_;
-    capacity_ = other.capacity_;
-    data_ = other.data_;
-
-    other.count_ = oldCount;
-    other.capacity_ = oldCapacity;
-    other.data_ = oldData;
-
+    swap(other);
     return *this;
 }
 
@@ -188,27 +155,47 @@ Vector<Type>& Vector<Type>::operator=(Vector<Type>&& other)
 template<typename Type>
 Vector<Type>::~Vector()
 {
-    delete[] data_;
+    clear();
 }
 
 
 
 template<typename Type>
-void Vector<Type>::push_back(const Type& element)
+void Vector<Type>::reserve(std::size_t size)
+{
+    if (size <= capacity_) {
+        return;
+    }
+
+    std::size_t newCapacity = capacity_ * 2;
+    if (newCapacity == 0) {
+        newCapacity = 1;
+    }
+    while (size > newCapacity) {
+        newCapacity *= 2;
+        if (newCapacity < capacity_) {
+            newCapacity = maxSize();
+            break;
+        }
+    }
+    Type* newData = new Type[newCapacity];
+    std::copy(data_, data_ + count_, newData);
+
+    delete[] data_;
+    data_ = newData;
+    capacity_ = newCapacity;
+}
+
+
+
+template<typename Type>
+void Vector<Type>::pushBack(const Type& element)
 {
     if (count_ == capacity_) {
-        std::size_t newCapacity = capacity_ * 2;
-        if (newCapacity == 0) {
-            newCapacity = 1;
+        if (capacity_ == maxSize()) {
+            throw "LengthError";
         }
-        Type* newData = new Type[newCapacity];
-        for (std::size_t i = 0; i < count_; i++) {
-            newData[i] = data_[i];
-        }
-
-        delete[] data_;
-        data_ = newData;
-        capacity_ = newCapacity;
+        reserve(capacity_ + 1);
     }
 
     data_[count_] = element;
@@ -218,9 +205,14 @@ void Vector<Type>::push_back(const Type& element)
 
 
 template<typename Type>
-void Vector<Type>::pop_back()
+void Vector<Type>::popBack()
 {
-   count_ -= 1;
+    if (count_ == 0) {
+        throw "LogicError";
+    }
+
+    data_[count_ - 1].~Type();
+    --count_;
 }
 
 
@@ -228,25 +220,10 @@ void Vector<Type>::pop_back()
 template<typename Type>
 void Vector<Type>::assign(std::size_t count, const Type& value)
 {
-    if (count > capacity_) {
-        std::size_t newCapacity = capacity_ * 2;
-        if (newCapacity == 0) {
-            newCapacity = 1;
-        }
-        while (count > newCapacity) {
-            newCapacity *= 2;
-        }
-        Type* newData = new Type[newCapacity];
-
-        delete[] data_;
-        data_ = newData;
-        capacity_ = newCapacity;
-    }
-
+    reserve(count);
     for (std::size_t i = 0; i < count; i++) {
         data_[i] = value;
     }
-
     if (count > count_) {
         count_ = count;
     }
@@ -257,7 +234,10 @@ void Vector<Type>::assign(std::size_t count, const Type& value)
 template<typename Type>
 const Type& Vector<Type>::back() const
 {
-    return data_[count_ - 1];
+    if(count_ > 0) {
+        return data_[count_ - 1];
+    }
+    throw "LogicError";
 }
 
 
@@ -265,7 +245,10 @@ const Type& Vector<Type>::back() const
 template<typename Type>
 const Type& Vector<Type>::front() const
 {
-    return data_[0];
+    if(count_ > 0) {
+        return data_[0];
+    }
+    throw "LogicError";
 }
 
 
@@ -286,6 +269,14 @@ std::size_t Vector<Type>::size() const
 
 
 
+template <typename Type>
+std::size_t Vector<Type>::maxSize() const
+{
+    return std::numeric_limits<std::size_t>::max();
+}
+
+
+
 template<typename Type>
 bool Vector<Type>::empty() const
 {
@@ -297,85 +288,42 @@ bool Vector<Type>::empty() const
 template<typename Type>
 void Vector<Type>::clear()
 {
-    delete[] data_;
-    data_ = nullptr;
-    count_ = 0;
-    capacity_ = 0;
+    if (data_ != nullptr) {
+        delete[] data_;
+        data_ = nullptr;
+        count_ = 0;
+        capacity_ = 0;
+    }
 }
 
-
-
-template<typename Type>
-void Vector<Type>::reserve(std::size_t size)
-{
-    if (size <= capacity_) {
-        return;
-    }
-
-    std::size_t newCapacity = capacity_ * 2;
-    if (newCapacity == 0) {
-        newCapacity = 1;
-    }
-    while (size > newCapacity) {
-        newCapacity *= 2;
-    }
-    Type* newData = new Type[newCapacity];
-    for (std::size_t i = 0; i < count_; i++) {
-        newData[i] = data_[i];
-    }
-
-    delete[] data_;
-    data_ = newData;
-    capacity_ = newCapacity;
-}
 
 
 template<typename Type>
 void Vector<Type>::resize(std::size_t count)
 {
     if (count <= count_) {
-        count_ = count;
-        return;
-    }
-
-    if (count < capacity_) {
-        for (std::size_t i = count_; i < count; ++i) {
-            data_[i] = Type();
+        while (count_ > count) {
+            popBack();
+            -- count_;
         }
-        count_ = count;
         return;
     }
 
-    std::size_t newCapacity = capacity_ * 2;
-    if (newCapacity == 0) {
-        newCapacity = 1;
-    }
-    while (count > newCapacity) {
-        newCapacity *= 2;
-    }
-    Type* newData = new Type[newCapacity];
-    for(std::size_t i = 0; i < count_; ++i) {
-        newData[i] = data_[i];
-    }
-    for (std::size_t i = count_; i < count; ++i) {
-        newData[i] = Type();
-    }
+    reserve(count);
 
-    delete[] data_;
-    data_ = newData;
-    capacity_ = newCapacity;
-    count_ = count;
+    while(count_ < count) {
+        data_[count_] = Type();
+        ++count_;
+    }
 }
 
 
 
 template<typename Type>
-void Vector<Type>::shrink_to_fit()
+void Vector<Type>::shrinkToFit()
 {
     if (count_ == 0) {
-        delete[] data_;
-        data_ = nullptr;
-        capacity_ = 0;
+        clear();
         return;
     }
 
@@ -385,9 +333,7 @@ void Vector<Type>::shrink_to_fit()
             newCapacity /= 2;
         }
         Type* newData = new Type[newCapacity];
-        for(std::size_t i = 0; i < count_; ++i) {
-            newData[i] = data_[i];
-        }
+        std::copy(data_, data_ + count_, newData);
 
         delete[] data_;
         data_ = newData;
@@ -400,7 +346,10 @@ void Vector<Type>::shrink_to_fit()
 template<typename Type>
 Type& Vector<Type>::at(std::size_t index)
 {
-    return data_[index];
+    if (index < count_) {
+        return data_[index];
+    }
+    throw "IndexOutOfRange";
 }
 
 
@@ -408,7 +357,10 @@ Type& Vector<Type>::at(std::size_t index)
 template<typename Type>
 const Type& Vector<Type>::at(std::size_t index) const
 {
-    return data_[index];
+    if (index < count_) {
+        return data_[index];
+    }
+    throw "IndexOutOfRange";
 }
 
 
@@ -425,6 +377,26 @@ template<typename Type>
 const Type& Vector<Type>::operator[](std::size_t index) const
 {
     return data_[index];
+}
+
+
+
+// ToDo: TEST IT BETTER
+template <class Type>
+template <class ...Args>
+void Vector<Type>::emplaceBack(Args&&... args)
+{
+    pushBack(std::move(Type(args...)));
+}
+
+
+
+template<class Type>
+void Vector<Type>::swap(Vector<Type>& other)
+{
+    std::swap(data_, other.data_);
+    std::swap(count_, other.count_);
+    std::swap(capacity_, other.capacity_);
 }
 //***************************************************************************//
 
